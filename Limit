@@ -1,0 +1,232 @@
+using CSharp_MetaBots.ExcelMetabot;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using OpenQA.Selenium;
+using OpenQA.Selenium.Chrome;
+using OpenQA.Selenium.Remote;
+using OpenQA.Selenium.Support.UI;
+
+
+namespace COTC.Limit {
+	
+	static class DictExtension {
+		public static TValue GetValueOrDefault<TKey, TValue>(this Dictionary<TKey, TValue> dictionary, TKey key, TValue defaultValue = default(TValue)) {
+			if (dictionary == null) {
+				throw new ArgumentNullException(nameof (dictionary));
+			} // using C# 6
+			if (key == null) {
+				throw new ArgumentNullException(nameof (key));
+			} //  using C# 6
+
+			TValue value;
+			return dictionary.TryGetValue(key, out value) ? value : defaultValue;
+		}
+	}
+	
+	class Program {
+		
+		/// <summary>This method generate and download report from website
+		///    </summary>
+		public static void generateReport(string startDate, string endDate){
+			try {
+				var options = new ChromeOptions();
+				if (System.IO.File.Exists(@"C:\Program Files\Google\Chrome\Application\chrome.exe"))
+					options.BinaryLocation = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
+				var driver = new ChromeDriver(options);
+				driver.Navigate().GoToUrl("https://www.bamosz.hu/letoltesek/");
+				Thread.Sleep(2000);
+				driver.FindElementByXPath("//*[@value='1074']").Click();
+				Thread.Sleep(500);
+				IWebElement element = driver.FindElementByXPath("//select[@id='A6035:letoltesForm:alapokList']");
+				Console.WriteLine(element.GetAttribute("id"));
+				Thread.Sleep(3000);
+				TimeSpan time = new TimeSpan(10);
+				var wait = new WebDriverWait(driver,time);
+				element = wait.Until(ExpectedConditions.ElementToBeClickable(By.Id("A6035:letoltesForm:alapokList")));
+				var seleEle = new SelectElement(element);
+				var lista = seleEle.Options;
+				foreach (IWebElement ele in lista) {
+					Console.WriteLine(ele.GetAttribute("Value"));
+					seleEle.SelectByValue(ele.GetAttribute("Value"));
+				}
+				Console.WriteLine("Koniec");
+				driver.FindElementByXPath("//label[@for='A6035:letoltesForm:j_idt72:0']").Click();
+				driver.FindElementByXPath("//input[@id='A6035:letoltesForm:letCal1_input']").Clear();
+				driver.FindElementByXPath("//input[@id='A6035:letoltesForm:letCal2_input']").Clear();
+				driver.FindElementByXPath("//input[@id='A6035:letoltesForm:letCal1_input']").SendKeys(startDate);
+				driver.FindElementByXPath("//input[@id='A6035:letoltesForm:letCal2_input']").SendKeys(endDate);
+				driver.FindElementByXPath("//button[@id='A6035:letoltesForm:j_idt120']").Click();
+			}
+			catch(Exception e)
+			{
+				System.Console.WriteLine(e);
+			}
+				Thread.Sleep(5000);
+		}
+		
+		
+		/// <summary>This is main method which insert values to excel template.
+		///    </summary>
+		public static void MKBexcel(string path, string fileNameCsv, Excel excel, string endDate, string startDate, string pathMNBrateFile, string pathExcelGrid){
+			
+			Dictionary<string, string> Grid = new Dictionary<string, string>();
+			List<string> values = new List<string>();
+			List<string> AlapNeve = new List<string>();
+			List<string> ISINkod = new List<string>();
+			List<string> Devizanem = new List<string>();
+			List<string> indulasDatuma = new List<string>();
+			List<string> endDateReport = new List<string>();
+			List<string> startDateReport = new List<string>();
+			
+			int i = 0;
+			values = loadCsvFile(path + fileNameCsv);
+			int count = values.Count();
+			string buff = string.Join( ";", values[2] ); 
+			AlapNeve = buff.Split(';').ToList();
+			buff = string.Join( ";", values[1] );
+			ISINkod = buff.Split(';').ToList();
+			buff = string.Join( ";", values[12] );
+			Devizanem = buff.Split(';').ToList();
+			buff = string.Join( ";", values[14] );
+			indulasDatuma = buff.Split(';').ToList();
+			buff = string.Join( ";", values[16] );
+			endDateReport = buff.Split(';').ToList();
+			buff = string.Join( ";", values[count-1] );
+			startDateReport = buff.Split(';').ToList();
+			
+			excel.Open(path+"MKB robotics1.xlsx");
+			excel.Show();
+			excel.ActivateSheet("BAMOSZ");
+			insertValues(excel, AlapNeve, 3, 8, false);
+			insertValues(excel, ISINkod, 2, 8, false);
+			insertValues(excel, Devizanem, 4, 8, false);
+			insertValues(excel, indulasDatuma, 5, 8, false);
+			insertValues(excel, endDateReport, 6,7, true);
+			insertValues(excel, startDateReport, 7, 7, true);
+			excel.SetValue(4, 9, MNBRates(endDate,pathMNBrateFile, 7));
+			excel.SetValue(5, 9, "=I4/" + MNBRates(endDate,pathMNBrateFile, 23));
+			excel.SetValue(4, 10, MNBRates(startDate,pathMNBrateFile, 7));
+			excel.SetValue(5, 10, "=J4/" + MNBRates(startDate,pathMNBrateFile, 23));
+			Grid = GridInsert(pathExcelGrid, ISINkod);
+			insertGridValues(excel, Grid, count);
+			excel.SaveAs(pathMNBrateFile, startDate + "_" + endDate + ".xlsx");
+			excel.Quit();
+		}
+		
+		
+		public static void insertGridValues(Excel excel, Dictionary<string, string> Grid, int count){
+			
+			int row = 8;
+			for (int i = 0; i<count;  i++){
+				string check = excel.GetValue(row, 2);
+				excel.SetValue(row, 1, Convert.ToString(DictExtension.GetValueOrDefault(Grid,check)));
+				row++;
+			}
+		}
+		
+		
+		public static void insertValues (Excel excel, List<string> values, int column, int startRow, bool dates){
+			
+			System.Console.WriteLine(values[0]);
+			int count = values.Count();
+			if (!dates){
+				for (int i = 1; i < count; i++) {
+				excel.SetValue(startRow, column, values[i]);
+				startRow++;
+				System.Console.WriteLine(values[i]);
+				}
+			}
+			else {
+				for (int i = 0; i < count; i++) {
+				excel.SetValue(startRow, column, values[i].Replace(',','.'));
+				startRow++;
+				System.Console.WriteLine(values[i]);
+				}
+			}
+		}
+		
+		
+		/// <summary>This method read the csv file and take text from file to list.
+		///    </summary>
+		 public static List<string> loadCsvFile(string filePath)
+        {
+            var reader = new StreamReader(File.OpenRead(filePath));
+            List<string> searchList = new List<string>();
+            while(!reader.EndOfStream)
+            {
+                var line = reader.ReadLine();
+                searchList.Add(line);
+            }
+            return searchList;
+        }
+		
+		/// <summary>This method read and take text from txt file and convert to list.
+		///    </summary>
+		public static string MNBRates(string date, string pathFile, int flag) {
+			string dateToPath = date.Replace('.', '_');
+			string fileName = $"MNB_{dateToPath}.txt";
+			string path = Path.Combine(pathFile, fileName);
+			if (!System.IO.File.Exists(path)) {
+				System.Console.WriteLine("File is not exist");
+			}
+			char enter = Convert.ToChar(10);
+			string[] rates = new string[25];
+			string readText = System.IO.File.ReadAllText(path);
+			var values = readText.Split(enter);
+
+			int start = 8;
+			for (int i = 0; i<25;  i++){
+				rates[i] = values[start].Substring(4).Trim();
+				System.Console.WriteLine(i);
+				System.Console.WriteLine(rates[i]);
+				start++;
+			}
+			return rates[flag];
+		}
+		
+		public static Dictionary<string, string> GridInsert ( string pathExcelGrid, List<string> ISINkod){
+			
+			Excel excelGrip = new Excel();
+			Dictionary<string, string> Grid = new Dictionary<string, string>();
+			excelGrip.Open(pathExcelGrid+"ISIN_codes.xlsx");
+			excelGrip.ActivateSheet("bamosz");
+			foreach(string kod in ISINkod){
+				int row = 2;
+				for (int i = 0; i< 1000;  i++){
+					if(kod==excelGrip.GetValue(row,2)){
+						Grid.Add(kod, excelGrip.GetValue(row,1));
+						row=1000;
+					}
+					else
+						row++;
+				}
+				System.Console.WriteLine(row + " - " + kod);
+			}
+			excelGrip.Close();
+			excelGrip.Quit();
+			return Grid;
+		}
+		
+		static void Main(string[] args) {
+			
+			
+			
+			Excel excel = new Excel();
+			string startDate = Microsoft.VisualBasic.Interaction.InputBox("Enter the start date of report in format YYYY.MM.DD (for example: 2022.03.15: ");
+			string endDate = Microsoft.VisualBasic.Interaction.InputBox("Enter the end date of report in format YYYY.MM.DD (for example: 2022.03.15: ");
+			string pathTemplateFile = Microsoft.VisualBasic.Interaction.InputBox(@"Insert the path of template file without name of file (example C:\Windows\");
+			string pathMNBrateFile = Microsoft.VisualBasic.Interaction.InputBox(@"Insert the path of MNB.txt  file (example C:\Windows\");
+			string pathExcelGrid = Microsoft.VisualBasic.Interaction.InputBox(@"Insert the path of excel with GRID and ISIN kod (example C:\Windows\");
+			string fileNameCsv = "funds_" + startDate.Replace(".", "") + "_" + endDate.Replace(".","") + ".csv";
+			System.Console.WriteLine(fileNameCsv);
+
+			generateReport(startDate, endDate);
+			MKBexcel(pathTemplateFile, fileNameCsv, excel, endDate, startDate, pathMNBrateFile, pathExcelGrid);
+			System.Console.ReadKey();
+        }
+    }
+}
